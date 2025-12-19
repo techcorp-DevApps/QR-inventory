@@ -1,12 +1,21 @@
-import { v4 as uuidv4 } from 'uuid';
+import * as Crypto from 'expo-crypto';
 import type { EntityType } from '@/types/inventory';
+
+/**
+ * Generate a UUID v4 using expo-crypto for native compatibility
+ * This works properly in both development and production APK builds
+ */
+function generateUUID(): string {
+  const uuid = Crypto.randomUUID();
+  return uuid;
+}
 
 /**
  * Generate a unique QR data string for an inventory entity
  * Format: PREFIX-TYPE:UUID:NAME or TYPE:UUID:NAME (if no prefix)
  */
 export function generateQRData(type: EntityType, name: string, prefix?: string): string {
-  const id = uuidv4();
+  const id = generateUUID();
   const typePrefix = type.toUpperCase().substring(0, 3); // LOC, ARE, SEC, ITE
   const fullPrefix = prefix ? `${prefix}-${typePrefix}` : typePrefix;
   return `${fullPrefix}:${id}:${encodeURIComponent(name)}`;
@@ -17,7 +26,7 @@ export function generateQRData(type: EntityType, name: string, prefix?: string):
  * Format: PREFIX-PRE:UUID or PRE:UUID (if no prefix)
  */
 export function generatePreQRCode(prefix?: string): string {
-  const id = uuidv4();
+  const id = generateUUID();
   const typePrefix = prefix ? `${prefix}-PRE` : 'PRE';
   return `${typePrefix}:${id}`;
 }
@@ -121,8 +130,8 @@ export function isValidQRData(qrData: string): boolean {
 }
 
 /**
- * Generate a new UUID
+ * Generate a new UUID using expo-crypto for native compatibility
  */
 export function generateId(): string {
-  return uuidv4();
+  return generateUUID();
 }
