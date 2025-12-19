@@ -9,9 +9,16 @@ export interface BackupData {
   exportedAt: string;
   inventory: InventoryData;
   preGeneratedQRs: PreGeneratedQR[];
+  // Metadata for backup info
+  metadata?: {
+    appVersion: string;
+    deviceInfo?: string;
+    totalPhotos?: number;
+  };
 }
 
-const BACKUP_VERSION = '1.0';
+const BACKUP_VERSION = '2.0'; // Updated version for new features
+const APP_VERSION = '1.1.0';
 
 /**
  * Create a backup object from current inventory data
@@ -20,11 +27,20 @@ export function createBackupData(
   inventory: InventoryData,
   preGeneratedQRs: PreGeneratedQR[]
 ): BackupData {
+  // Count total photos across all items
+  const totalPhotos = inventory.items.reduce((count, item) => {
+    return count + (item.photos?.length || 0);
+  }, 0);
+
   return {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     inventory,
     preGeneratedQRs,
+    metadata: {
+      appVersion: APP_VERSION,
+      totalPhotos,
+    },
   };
 }
 
@@ -55,6 +71,50 @@ export function validateBackupData(data: unknown): data is BackupData {
   }
   
   return true;
+}
+
+/**
+ * Migrate backup data from older versions to current version
+ */
+export function migrateBackupData(data: BackupData): BackupData {
+  // Version 1.0 to 2.0 migration
+  if (data.version === '1.0') {
+    // Add default values for new fields in items
+    const migratedItems = data.inventory.items.map(item => ({
+      ...item,
+      quantity: item.quantity ?? 1,
+      condition: item.condition ?? 'good',
+    }));
+
+    // Add default values for new fields in locations
+    const migratedLocations = data.inventory.locations.map(location => ({
+      ...location,
+      // icon and color are optional, so no defaults needed
+    }));
+
+    // Add default values for new fields in preGeneratedQRs
+    const migratedQRs = (data.preGeneratedQRs || []).map(qr => ({
+      ...qr,
+      // label and notes are optional, so no defaults needed
+    }));
+
+    return {
+      ...data,
+      version: BACKUP_VERSION,
+      inventory: {
+        ...data.inventory,
+        items: migratedItems,
+        locations: migratedLocations,
+      },
+      preGeneratedQRs: migratedQRs,
+      metadata: {
+        appVersion: APP_VERSION,
+        totalPhotos: migratedItems.reduce((count, item) => count + (item.photos?.length || 0), 0),
+      },
+    };
+  }
+
+  return data;
 }
 
 /**
@@ -126,7 +186,9 @@ export async function importBackup(): Promise<BackupData | null> {
               return;
             }
             
-            resolve(data);
+            // Migrate if needed
+            const migratedData = migrateBackupData(data);
+            resolve(migratedData);
           } catch (error) {
             reject(new Error('Failed to parse backup file'));
           }
@@ -156,7 +218,8 @@ export async function importBackup(): Promise<BackupData | null> {
         throw new Error('Invalid backup file format');
       }
 
-      return data;
+      // Migrate if needed
+      return migrateBackupData(data);
     }
   } catch (error) {
     console.error('Import error:', error);
@@ -194,7 +257,18 @@ export function getBackupSummary(data: BackupData): {
   items: number;
   preGeneratedQRs: number;
   exportedAt: string;
+  version: string;
+  totalPhotos: number;
+  hasCustomFields: boolean;
 } {
+  const totalPhotos = data.inventory.items.reduce((count, item) => {
+    return count + (item.photos?.length || 0);
+  }, 0);
+
+  const hasCustomFields = data.inventory.items.some(item => 
+    item.customFields && item.customFields.length > 0
+  );
+
   return {
     locations: data.inventory.locations.length,
     areas: data.inventory.areas.length,
@@ -202,5 +276,66 @@ export function getBackupSummary(data: BackupData): {
     items: data.inventory.items.length,
     preGeneratedQRs: data.preGeneratedQRs?.length || 0,
     exportedAt: data.exportedAt,
+    version: data.version,
+    totalPhotos,
+    hasCustomFields,
+  };
+}
+
+/**
+ * Export backup without photos (smaller file size)
+ */
+export async function exportBackupWithoutPhotos(
+  inventory: InventoryData,
+  preGeneratedQRs: PreGeneratedQR[]
+): Promise<void> {
+  // Create a copy of inventory without photos
+  const inventoryWithoutPhotos: InventoryData = {
+    ...inventory,
+    items: inventory.items.map(item => {
+      const { photos, ...itemWithoutPhotos } = item;
+      return itemWithoutPhotos;
+    }),
+  };
+
+  await exportBackup(inventoryWithoutPhotos, preGeneratedQRs);
+}
+
+/**
+ * Validate that imported data is compatible with current app version
+ */
+export function checkBackupCompatibility(data: BackupData): {
+  compatible: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  
+  // Check version
+  const [majorVersion] = data.version.split('.').map(Number);
+  const [currentMajor] = BACKUP_VERSION.split('.').map(Number);
+  
+  if (majorVersion > currentMajor) {
+    return {
+      compatible: false,
+      warnings: ['This backup was created with a newer version of the app and may not be compatible.'],
+    };
+  }
+
+  if (majorVersion < currentMajor) {
+    warnings.push('This backup was created with an older version and will be automatically migrated.');
+  }
+
+  // Check for large photo data
+  const totalPhotos = data.inventory.items.reduce((count, item) => {
+    return count + (item.photos?.length || 0);
+  }, 0);
+
+  if (totalPhotos > 100) {
+    warnings.push(`This backup contains ${totalPhotos} photos which may take a while to restore.`);
+  }
+
+  return {
+    compatible: true,
+    warnings,
   };
 }

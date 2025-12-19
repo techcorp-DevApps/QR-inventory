@@ -66,7 +66,7 @@ export default function SectionScreen() {
 
   const handleEditItem = async (name: string) => {
     if (selectedItem) {
-      await updateItem(selectedItem.id, name);
+      await updateItem(selectedItem.id, { name });
       setSelectedItem(null);
     }
   };

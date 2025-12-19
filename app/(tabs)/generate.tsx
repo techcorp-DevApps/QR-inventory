@@ -14,11 +14,14 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { QRLabelModal } from '@/components/qr-label-modal';
+import { BatchAssignModal } from '@/components/batch-assign-modal';
 import { Colors, Spacing, BorderRadius } from '@/constants/theme';
 import { useInventoryContext } from '@/contexts/inventory-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { qrDataToHex, formatHexForDisplay } from '@/lib/qr-utils';
 import { exportQRCodesToPDF, printQRCodes } from '@/lib/pdf-export';
+import type { PreGeneratedQR } from '@/types/inventory';
 
 type ViewMode = 'generate' | 'list' | 'print';
 
@@ -27,13 +30,27 @@ export default function GenerateScreen() {
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
 
-  const { preGeneratedQRs, generateBulkQRs, deletePreGeneratedQR, clearUnassignedPreQRs, getUnassignedPreQRs } = useInventoryContext();
+  const { 
+    preGeneratedQRs, 
+    generateBulkQRs, 
+    deletePreGeneratedQR, 
+    clearUnassignedPreQRs, 
+    getUnassignedPreQRs,
+    updatePreGeneratedQR,
+    batchAssignQRCodes,
+    items,
+  } = useInventoryContext();
 
   const [viewMode, setViewMode] = useState<ViewMode>('generate');
   const [count, setCount] = useState('10');
   const [prefix, setPrefix] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  
+  // Modal states
+  const [selectedQR, setSelectedQR] = useState<PreGeneratedQR | null>(null);
+  const [showLabelModal, setShowLabelModal] = useState(false);
+  const [showBatchAssignModal, setShowBatchAssignModal] = useState(false);
 
   const unassignedQRs = useMemo(() => getUnassignedPreQRs(), [getUnassignedPreQRs, preGeneratedQRs]);
 
@@ -103,6 +120,26 @@ export default function GenerateScreen() {
       Alert.alert('Error', 'Failed to print. Please try again.');
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleEditQRLabel = (qr: PreGeneratedQR) => {
+    setSelectedQR(qr);
+    setShowLabelModal(true);
+  };
+
+  const handleSaveQRLabel = async (label: string, notes: string) => {
+    if (selectedQR) {
+      await updatePreGeneratedQR(selectedQR.qrData, label || undefined, notes || undefined);
+    }
+  };
+
+  const handleBatchAssign = async (qrCodes: PreGeneratedQR[], assignedItems: typeof items) => {
+    try {
+      await batchAssignQRCodes(qrCodes, assignedItems);
+      Alert.alert('Success', `Successfully assigned ${qrCodes.length} QR codes to items`);
+    } catch (error) {
+      Alert.alert('Error', 'Failed to assign QR codes');
     }
   };
 
@@ -191,6 +228,30 @@ export default function GenerateScreen() {
           </View>
         </View>
       </View>
+
+      {/* Batch Assignment Card */}
+      {unassignedQRs.length > 0 && items.length > 0 && (
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <View style={styles.cardHeader}>
+            <MaterialIcons name="link" size={24} color="#8B5CF6" />
+            <ThemedText type="subtitle" style={styles.cardTitle}>
+              Batch Assignment
+            </ThemedText>
+          </View>
+          <ThemedText style={[styles.cardDesc, { color: colors.textSecondary }]}>
+            Assign multiple QR codes to items at once. Select QR codes and items to link them together.
+          </ThemedText>
+          <Pressable
+            style={[styles.batchButton, { backgroundColor: '#8B5CF6' }]}
+            onPress={() => setShowBatchAssignModal(true)}
+          >
+            <MaterialIcons name="playlist-add-check" size={20} color="#FFFFFF" />
+            <ThemedText style={styles.batchButtonText}>
+              Start Batch Assignment
+            </ThemedText>
+          </Pressable>
+        </View>
+      )}
     </ScrollView>
   );
 
@@ -223,11 +284,19 @@ export default function GenerateScreen() {
           keyExtractor={(item) => item.qrData}
           contentContainerStyle={styles.qrList}
           renderItem={({ item }) => (
-            <View style={[styles.qrItem, { backgroundColor: colors.card }]}>
+            <Pressable 
+              style={[styles.qrItem, { backgroundColor: colors.card }]}
+              onPress={() => handleEditQRLabel(item)}
+            >
               <View style={styles.qrPreview}>
                 <QRCode value={item.qrData} size={60} backgroundColor="transparent" color={colors.text} />
               </View>
               <View style={styles.qrInfo}>
+                {item.label && (
+                  <ThemedText style={styles.qrLabel} numberOfLines={1}>
+                    {item.label}
+                  </ThemedText>
+                )}
                 {item.prefix && (
                   <View style={[styles.prefixTag, { backgroundColor: colors.tint + '20' }]}>
                     <ThemedText style={[styles.prefixText, { color: colors.tint }]}>
@@ -238,17 +307,31 @@ export default function GenerateScreen() {
                 <ThemedText style={[styles.qrHex, { color: colors.textSecondary }]} numberOfLines={1}>
                   {formatHexForDisplay(qrDataToHex(item.qrData)).substring(0, 24)}...
                 </ThemedText>
-                <ThemedText style={[styles.qrDate, { color: colors.textDisabled }]}>
-                  {new Date(item.createdAt).toLocaleDateString()}
-                </ThemedText>
+                {item.notes ? (
+                  <ThemedText style={[styles.qrNotes, { color: colors.textDisabled }]} numberOfLines={1}>
+                    {item.notes}
+                  </ThemedText>
+                ) : (
+                  <ThemedText style={[styles.qrDate, { color: colors.textDisabled }]}>
+                    {new Date(item.createdAt).toLocaleDateString()}
+                  </ThemedText>
+                )}
               </View>
-              <Pressable
-                style={styles.deleteButton}
-                onPress={() => deletePreGeneratedQR(item.qrData)}
-              >
-                <MaterialIcons name="delete-outline" size={22} color="#EF4444" />
-              </Pressable>
-            </View>
+              <View style={styles.qrActions}>
+                <Pressable
+                  style={styles.editButton}
+                  onPress={() => handleEditQRLabel(item)}
+                >
+                  <MaterialIcons name="edit" size={20} color={colors.tint} />
+                </Pressable>
+                <Pressable
+                  style={styles.deleteButton}
+                  onPress={() => deletePreGeneratedQR(item.qrData)}
+                >
+                  <MaterialIcons name="delete-outline" size={22} color="#EF4444" />
+                </Pressable>
+              </View>
+            </Pressable>
           )}
         />
       )}
@@ -293,6 +376,9 @@ export default function GenerateScreen() {
         {unassignedQRs.map((qr) => (
           <View key={qr.qrData} style={[styles.printCard, { backgroundColor: '#FFFFFF' }]}>
             <QRCode value={qr.qrData} size={100} backgroundColor="#FFFFFF" color="#000000" />
+            {qr.label && (
+              <ThemedText style={styles.printLabel} numberOfLines={1}>{qr.label}</ThemedText>
+            )}
             {qr.prefix && (
               <ThemedText style={styles.printPrefix}>{qr.prefix}</ThemedText>
             )}
@@ -350,6 +436,26 @@ export default function GenerateScreen() {
       {viewMode === 'generate' && renderGenerateView()}
       {viewMode === 'list' && renderListView()}
       {viewMode === 'print' && renderPrintView()}
+
+      {/* QR Label Modal */}
+      <QRLabelModal
+        visible={showLabelModal}
+        onClose={() => {
+          setShowLabelModal(false);
+          setSelectedQR(null);
+        }}
+        onSave={handleSaveQRLabel}
+        qrCode={selectedQR}
+      />
+
+      {/* Batch Assignment Modal */}
+      <BatchAssignModal
+        visible={showBatchAssignModal}
+        onClose={() => setShowBatchAssignModal(false)}
+        onAssign={handleBatchAssign}
+        availableQRCodes={preGeneratedQRs}
+        availableItems={items}
+      />
     </ThemedView>
   );
 }
@@ -388,6 +494,12 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.md,
     padding: Spacing.lg,
   },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.xs,
+  },
   cardTitle: {
     marginBottom: Spacing.xs,
   },
@@ -425,6 +537,19 @@ const styles = StyleSheet.create({
   generateButtonText: {
     color: '#FFFFFF',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  batchButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: 48,
+    borderRadius: BorderRadius.sm,
+    gap: Spacing.sm,
+  },
+  batchButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
   },
   statsRow: {
@@ -473,6 +598,11 @@ const styles = StyleSheet.create({
   qrInfo: {
     flex: 1,
   },
+  qrLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
   prefixTag: {
     alignSelf: 'flex-start',
     paddingHorizontal: Spacing.sm,
@@ -488,9 +618,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontFamily: 'monospace',
   },
+  qrNotes: {
+    fontSize: 11,
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
   qrDate: {
     fontSize: 11,
     marginTop: 2,
+  },
+  qrActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  editButton: {
+    padding: Spacing.sm,
   },
   deleteButton: {
     padding: Spacing.sm,
@@ -556,11 +698,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#E5E7EB',
   },
+  printLabel: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#111827',
+    marginTop: Spacing.sm,
+    textAlign: 'center',
+  },
   printPrefix: {
     fontSize: 10,
     fontWeight: '600',
     color: '#374151',
-    marginTop: Spacing.sm,
+    marginTop: 4,
   },
   printHex: {
     fontSize: 8,

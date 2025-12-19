@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import QRCode from 'react-native-qrcode-svg';
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -17,9 +18,10 @@ interface QRModalProps {
   type: EntityType;
   breadcrumb?: string;
   onEditQR?: () => void;
+  onEdit?: () => void;
 }
 
-export function QRModal({ visible, onClose, name, qrData, type, breadcrumb, onEditQR }: QRModalProps) {
+export function QRModal({ visible, onClose, name, qrData, type, breadcrumb, onEditQR, onEdit }: QRModalProps) {
   const insets = useSafeAreaInsets();
   const colorScheme = useColorScheme() ?? 'light';
   const colors = Colors[colorScheme];
@@ -80,27 +82,41 @@ export function QRModal({ visible, onClose, name, qrData, type, breadcrumb, onEd
               </ScrollView>
             </View>
 
-            <View style={styles.buttonRow}>
+            {/* Action Buttons */}
+            <View style={styles.actionRow}>
+              {onEdit && (
+                <Pressable
+                  style={[styles.actionButton, { backgroundColor: colors.elevated }]}
+                  onPress={onEdit}
+                >
+                  <MaterialIcons name="edit" size={20} color={accentColor} />
+                  <ThemedText style={[styles.actionButtonText, { color: accentColor }]}>
+                    Edit {type.charAt(0).toUpperCase() + type.slice(1)}
+                  </ThemedText>
+                </Pressable>
+              )}
               {onEditQR && (
                 <Pressable
-                  style={[styles.editButton, { backgroundColor: accentColor }]}
+                  style={[styles.actionButton, { backgroundColor: colors.elevated }]}
                   onPress={() => {
                     onClose();
                     onEditQR();
                   }}
                 >
-                  <ThemedText style={[styles.buttonText, { color: '#FFFFFF' }]}>
-                    Edit QR Code
+                  <MaterialIcons name="qr-code" size={20} color={colors.textSecondary} />
+                  <ThemedText style={[styles.actionButtonText, { color: colors.textSecondary }]}>
+                    Change QR
                   </ThemedText>
                 </Pressable>
               )}
-              <Pressable
-                style={[styles.closeButton, { backgroundColor: colors.elevated }]}
-                onPress={onClose}
-              >
-                <ThemedText style={styles.buttonText}>Close</ThemedText>
-              </Pressable>
             </View>
+
+            <Pressable
+              style={[styles.closeButton, { backgroundColor: accentColor }]}
+              onPress={onClose}
+            >
+              <ThemedText style={[styles.closeButtonText, { color: '#FFFFFF' }]}>Close</ThemedText>
+            </Pressable>
           </Pressable>
         </ThemedView>
       </Pressable>
@@ -164,23 +180,30 @@ const styles = StyleSheet.create({
     fontFamily: 'monospace',
     letterSpacing: 1,
   },
-  buttonRow: {
+  actionRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
+    marginBottom: Spacing.md,
   },
-  editButton: {
+  actionButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: Spacing.xs,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.sm,
-    alignItems: 'center',
+  },
+  actionButtonText: {
+    fontSize: 13,
+    fontWeight: '600',
   },
   closeButton: {
-    flex: 1,
     paddingVertical: Spacing.md,
     borderRadius: BorderRadius.sm,
     alignItems: 'center',
   },
-  buttonText: {
+  closeButtonText: {
     fontSize: 15,
     fontWeight: '600',
   },

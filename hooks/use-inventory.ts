@@ -9,6 +9,10 @@ import type {
   Section,
   SearchResult,
   PreGeneratedQR,
+  LocationIcon,
+  LocationColor,
+  BulkItemTemplate,
+  CustomField,
 } from '@/types/inventory';
 
 const STORAGE_KEY = 'inventory_data';
@@ -68,8 +72,12 @@ export function useInventory() {
     }
   };
 
-  // Location CRUD
-  const addLocation = useCallback(async (name: string): Promise<Location> => {
+  // Location CRUD with icon and color support
+  const addLocation = useCallback(async (
+    name: string, 
+    icon?: LocationIcon, 
+    color?: LocationColor
+  ): Promise<Location> => {
     const id = generateId();
     const qrData = generateQRData('location', name);
     const newLocation: Location = {
@@ -78,17 +86,24 @@ export function useInventory() {
       qrData,
       type: 'location',
       createdAt: new Date().toISOString(),
+      icon,
+      color,
     };
     const newData = { ...data, locations: [...data.locations, newLocation] };
     await saveData(newData);
     return newLocation;
   }, [data]);
 
-  const updateLocation = useCallback(async (id: string, name: string) => {
+  const updateLocation = useCallback(async (
+    id: string, 
+    name: string,
+    icon?: LocationIcon,
+    color?: LocationColor
+  ) => {
     const newData = {
       ...data,
       locations: data.locations.map((loc) =>
-        loc.id === id ? { ...loc, name } : loc
+        loc.id === id ? { ...loc, name, icon, color } : loc
       ),
     };
     await saveData(newData);
@@ -232,12 +247,20 @@ export function useInventory() {
     await saveData(newData);
   }, [data]);
 
-  // Item CRUD
+  // Enhanced Item CRUD with photos, notes, and custom fields
   const addItem = useCallback(async (
     name: string,
     locationId: string,
     areaId: string,
-    sectionId: string | null
+    sectionId: string | null,
+    options?: {
+      description?: string;
+      quantity?: number;
+      condition?: Item['condition'];
+      photos?: string[];
+      notes?: string;
+      customFields?: CustomField[];
+    }
   ): Promise<Item> => {
     const id = generateId();
     const qrData = generateQRData('item', name);
@@ -250,17 +273,52 @@ export function useInventory() {
       areaId,
       sectionId,
       createdAt: new Date().toISOString(),
+      description: options?.description,
+      quantity: options?.quantity ?? 1,
+      condition: options?.condition ?? 'good',
+      photos: options?.photos,
+      notes: options?.notes,
+      customFields: options?.customFields,
     };
     const newData = { ...data, items: [...data.items, newItem] };
     await saveData(newData);
     return newItem;
   }, [data]);
 
-  const updateItem = useCallback(async (id: string, name: string) => {
+  // Bulk add items
+  const addBulkItems = useCallback(async (
+    templates: BulkItemTemplate[],
+    locationId: string,
+    areaId: string,
+    sectionId: string | null
+  ): Promise<Item[]> => {
+    const newItems: Item[] = templates.map(template => ({
+      id: generateId(),
+      name: template.name,
+      qrData: generateQRData('item', template.name),
+      type: 'item' as const,
+      locationId,
+      areaId,
+      sectionId,
+      createdAt: new Date().toISOString(),
+      description: template.description,
+      quantity: template.quantity ?? 1,
+      condition: template.condition ?? 'good',
+    }));
+    
+    const newData = { ...data, items: [...data.items, ...newItems] };
+    await saveData(newData);
+    return newItems;
+  }, [data]);
+
+  const updateItem = useCallback(async (
+    id: string, 
+    updates: Partial<Omit<Item, 'id' | 'type' | 'locationId' | 'areaId' | 'sectionId' | 'qrData' | 'createdAt'>>
+  ) => {
     const newData = {
       ...data,
       items: data.items.map((item) =>
-        item.id === id ? { ...item, name } : item
+        item.id === id ? { ...item, ...updates } : item
       ),
     };
     await saveData(newData);
@@ -291,7 +349,7 @@ export function useInventory() {
     await saveData(newData);
   }, [data]);
 
-  // Pre-generated QR codes
+  // Pre-generated QR codes with labels and notes
   const generateBulkQRs = useCallback(async (count: number, prefix?: string) => {
     const qrCodes = generateBulkQRCodes(count, prefix);
     const newPreQRs: PreGeneratedQR[] = qrCodes.map(qrData => ({
@@ -306,6 +364,13 @@ export function useInventory() {
     return newPreQRs;
   }, [preGeneratedQRs]);
 
+  const updatePreGeneratedQR = useCallback(async (qrData: string, label?: string, notes?: string) => {
+    const updatedPreQRs = preGeneratedQRs.map(q =>
+      q.qrData === qrData ? { ...q, label, notes } : q
+    );
+    await savePreGeneratedQRs(updatedPreQRs);
+  }, [preGeneratedQRs]);
+
   const deletePreGeneratedQR = useCallback(async (qrData: string) => {
     const updatedPreQRs = preGeneratedQRs.filter(q => q.qrData !== qrData);
     await savePreGeneratedQRs(updatedPreQRs);
@@ -315,6 +380,37 @@ export function useInventory() {
     const updatedPreQRs = preGeneratedQRs.filter(q => q.assignedTo !== null);
     await savePreGeneratedQRs(updatedPreQRs);
   }, [preGeneratedQRs]);
+
+  // Batch assign QR codes to items
+  const batchAssignQRCodes = useCallback(async (
+    qrCodes: PreGeneratedQR[],
+    items: Item[]
+  ) => {
+    if (qrCodes.length !== items.length) {
+      throw new Error('Number of QR codes must match number of items');
+    }
+
+    // Update items with new QR codes
+    const updatedItems = data.items.map(item => {
+      const index = items.findIndex(i => i.id === item.id);
+      if (index !== -1) {
+        return { ...item, qrData: qrCodes[index].qrData };
+      }
+      return item;
+    });
+
+    // Mark QR codes as assigned
+    const updatedPreQRs = preGeneratedQRs.map(qr => {
+      const index = qrCodes.findIndex(q => q.qrData === qr.qrData);
+      if (index !== -1) {
+        return { ...qr, assignedTo: items[index].id, assignedType: 'item' as const };
+      }
+      return qr;
+    });
+
+    await saveData({ ...data, items: updatedItems });
+    await savePreGeneratedQRs(updatedPreQRs);
+  }, [data, preGeneratedQRs]);
 
   // Getters
   const getLocationById = useCallback((id: string) => {
@@ -328,6 +424,10 @@ export function useInventory() {
   const getSectionById = useCallback((id: string) => {
     return data.sections.find((sec) => sec.id === id);
   }, [data.sections]);
+
+  const getItemById = useCallback((id: string) => {
+    return data.items.find((item) => item.id === id);
+  }, [data.items]);
 
   const getAreasByLocation = useCallback((locationId: string) => {
     return data.areas.filter((area) => area.locationId === locationId);
@@ -458,7 +558,7 @@ export function useInventory() {
     });
 
     data.items.forEach((item) => {
-      if (fuzzyMatch(item.name)) {
+      if (fuzzyMatch(item.name) || (item.description && fuzzyMatch(item.description))) {
         const location = data.locations.find((l) => l.id === item.locationId);
         const area = data.areas.find((a) => a.id === item.areaId);
         const section = item.sectionId
@@ -503,17 +603,21 @@ export function useInventory() {
     // Items
     items: data.items,
     addItem,
+    addBulkItems,
     updateItem,
     updateItemQR,
     deleteItem,
+    getItemById,
     getItemsByArea,
     getItemsBySection,
     // Pre-generated QRs
     preGeneratedQRs,
     generateBulkQRs,
+    updatePreGeneratedQR,
     deletePreGeneratedQR,
     clearUnassignedPreQRs,
     getUnassignedPreQRs,
+    batchAssignQRCodes,
     // Search
     search,
     // Backup/Restore

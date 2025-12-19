@@ -3,17 +3,17 @@ import { useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AddEditModal } from '@/components/add-edit-modal';
 import { EditQRModal } from '@/components/edit-qr-modal';
 import { FAB } from '@/components/fab';
 import { InventoryTile } from '@/components/inventory-tile';
+import { LocationCustomizeModal } from '@/components/location-customize-modal';
 import { QRModal } from '@/components/qr-modal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, Spacing } from '@/constants/theme';
 import { useInventoryContext } from '@/contexts/inventory-context';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import type { Location } from '@/types/inventory';
+import type { Location, LocationIcon, LocationColor } from '@/types/inventory';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -38,13 +38,13 @@ export default function HomeScreen() {
     setQRModalVisible(true);
   };
 
-  const handleAddLocation = async (name: string) => {
-    await addLocation(name);
+  const handleAddLocation = async (data: { name: string; icon?: LocationIcon; color?: LocationColor }) => {
+    await addLocation(data.name, data.icon, data.color);
   };
 
-  const handleEditLocation = async (name: string) => {
+  const handleEditLocation = async (data: { name: string; icon?: LocationIcon; color?: LocationColor }) => {
     if (selectedLocation) {
-      await updateLocation(selectedLocation.id, name);
+      await updateLocation(selectedLocation.id, data.name, data.icon, data.color);
       setSelectedLocation(null);
     }
   };
@@ -66,6 +66,11 @@ export default function HomeScreen() {
       // Update the selected location with new QR data for display
       setSelectedLocation({ ...selectedLocation, qrData: newQRData });
     }
+  };
+
+  const handleEditFromQRModal = () => {
+    setQRModalVisible(false);
+    setEditModalVisible(true);
   };
 
   if (loading) {
@@ -104,6 +109,8 @@ export default function HomeScreen() {
               name={item.name}
               qrData={item.qrData}
               type="location"
+              icon={item.icon}
+              color={item.color}
               onPress={() => handleLocationPress(item)}
               onLongPress={() => handleLocationLongPress(item)}
             />
@@ -113,14 +120,15 @@ export default function HomeScreen() {
 
       <FAB onPress={() => setAddModalVisible(true)} />
 
-      <AddEditModal
+      {/* Add Location Modal */}
+      <LocationCustomizeModal
         visible={addModalVisible}
         onClose={() => setAddModalVisible(false)}
         onSave={handleAddLocation}
-        type="location"
       />
 
-      <AddEditModal
+      {/* Edit Location Modal */}
+      <LocationCustomizeModal
         visible={editModalVisible}
         onClose={() => {
           setEditModalVisible(false);
@@ -128,8 +136,7 @@ export default function HomeScreen() {
         }}
         onSave={handleEditLocation}
         onDelete={handleDeleteLocation}
-        type="location"
-        initialName={selectedLocation?.name}
+        initialData={selectedLocation || undefined}
         isEditing
       />
 
@@ -145,6 +152,7 @@ export default function HomeScreen() {
             qrData={selectedLocation.qrData}
             type="location"
             onEditQR={handleEditQR}
+            onEdit={handleEditFromQRModal}
           />
 
           <EditQRModal

@@ -13,8 +13,13 @@ import {
   importBackup,
   getBackupSizeEstimate,
   getBackupSummary,
+  checkBackupCompatibility,
   type BackupData,
 } from '@/lib/backup-utils';
+import {
+  exportInventoryReportPDF,
+  printInventoryReport,
+} from '@/lib/inventory-report';
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
@@ -34,9 +39,11 @@ export default function SettingsScreen() {
 
   const [isExporting, setIsExporting] = useState(false);
   const [isImporting, setIsImporting] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   const backupSize = getBackupSizeEstimate(data, preGeneratedQRs);
   const totalItems = locations.length + areas.length + sections.length + items.length;
+  const totalPhotos = items.reduce((count, item) => count + (item.photos?.length || 0), 0);
 
   const handleExport = async () => {
     if (totalItems === 0 && preGeneratedQRs.length === 0) {
@@ -67,10 +74,22 @@ export default function SettingsScreen() {
       }
 
       const summary = getBackupSummary(backupData);
+      const compatibility = checkBackupCompatibility(backupData);
+
+      if (!compatibility.compatible) {
+        Alert.alert('Incompatible Backup', compatibility.warnings[0]);
+        setIsImporting(false);
+        return;
+      }
+
+      let warningMessage = '';
+      if (compatibility.warnings.length > 0) {
+        warningMessage = '\n\n⚠️ ' + compatibility.warnings.join('\n⚠️ ');
+      }
       
       Alert.alert(
         'Import Backup',
-        `This backup contains:\n• ${summary.locations} locations\n• ${summary.areas} areas\n• ${summary.sections} sections\n• ${summary.items} items\n• ${summary.preGeneratedQRs} pre-generated QR codes\n\nExported: ${new Date(summary.exportedAt).toLocaleString()}\n\nHow would you like to proceed?`,
+        `This backup contains:\n• ${summary.locations} locations\n• ${summary.areas} areas\n• ${summary.sections} sections\n• ${summary.items} items\n• ${summary.preGeneratedQRs} pre-generated QR codes\n• ${summary.totalPhotos} photos${summary.hasCustomFields ? '\n• Custom fields' : ''}\n\nExported: ${new Date(summary.exportedAt).toLocaleString()}${warningMessage}\n\nHow would you like to proceed?`,
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -115,6 +134,38 @@ export default function SettingsScreen() {
     }
   };
 
+  const handleExportPDF = async () => {
+    if (items.length === 0) {
+      Alert.alert('No Items', 'Add some inventory items before generating a report.');
+      return;
+    }
+
+    setIsGeneratingPDF(true);
+    try {
+      await exportInventoryReportPDF(data);
+      Alert.alert('Success', 'Inventory report exported successfully!');
+    } catch (error) {
+      console.error('PDF export error:', error);
+      Alert.alert('Export Failed', 'Failed to generate PDF report. Please try again.');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
+  const handlePrintReport = async () => {
+    if (items.length === 0) {
+      Alert.alert('No Items', 'Add some inventory items before printing a report.');
+      return;
+    }
+
+    try {
+      await printInventoryReport(data);
+    } catch (error) {
+      console.error('Print error:', error);
+      Alert.alert('Print Failed', 'Failed to print inventory report.');
+    }
+  };
+
   const handleClearData = () => {
     if (totalItems === 0 && preGeneratedQRs.length === 0) {
       Alert.alert('Nothing to Clear', 'Your inventory is already empty.');
@@ -123,7 +174,7 @@ export default function SettingsScreen() {
 
     Alert.alert(
       'Clear All Data',
-      `This will permanently delete:\n• ${locations.length} locations\n• ${areas.length} areas\n• ${sections.length} sections\n• ${items.length} items\n• ${preGeneratedQRs.length} pre-generated QR codes\n\nThis action cannot be undone. Consider creating a backup first.`,
+      `This will permanently delete:\n• ${locations.length} locations\n• ${areas.length} areas\n• ${sections.length} sections\n• ${items.length} items\n• ${preGeneratedQRs.length} pre-generated QR codes\n• ${totalPhotos} photos\n\nThis action cannot be undone. Consider creating a backup first.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -145,6 +196,38 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
+        {/* Inventory Report Section */}
+        <View style={[styles.section, { backgroundColor: colors.card }]}>
+          <View style={styles.sectionHeader}>
+            <MaterialIcons name="description" size={24} color="#8B5CF6" />
+            <ThemedText type="subtitle" style={styles.sectionTitle}>Inventory Report</ThemedText>
+          </View>
+          
+          <ThemedText style={[styles.sectionDesc, { color: colors.textSecondary }]}>
+            Generate a comprehensive PDF report of your entire inventory with QR codes, item details, and location hierarchy.
+          </ThemedText>
+
+          <View style={styles.buttonRow}>
+            <Pressable
+              style={[styles.button, styles.flexButton, { backgroundColor: '#8B5CF6', opacity: isGeneratingPDF ? 0.7 : 1 }]}
+              onPress={handleExportPDF}
+              disabled={isGeneratingPDF}
+            >
+              <MaterialIcons name="picture-as-pdf" size={20} color="#FFFFFF" />
+              <ThemedText style={styles.buttonText}>
+                {isGeneratingPDF ? 'Generating...' : 'Export PDF'}
+              </ThemedText>
+            </Pressable>
+            
+            <Pressable
+              style={[styles.button, styles.outlineButton, { borderColor: '#8B5CF6' }]}
+              onPress={handlePrintReport}
+            >
+              <MaterialIcons name="print" size={20} color="#8B5CF6" />
+            </Pressable>
+          </View>
+        </View>
+
         {/* Backup Section */}
         <View style={[styles.section, { backgroundColor: colors.card }]}>
           <View style={styles.sectionHeader}>
@@ -153,7 +236,7 @@ export default function SettingsScreen() {
           </View>
           
           <ThemedText style={[styles.sectionDesc, { color: colors.textSecondary }]}>
-            Export your inventory data as a JSON file for safekeeping or transfer to another device.
+            Export your inventory data as a JSON file for safekeeping or transfer to another device. Includes all photos and custom fields.
           </ThemedText>
 
           <View style={[styles.statsBox, { backgroundColor: colors.elevated }]}>
@@ -168,6 +251,12 @@ export default function SettingsScreen() {
                 Pre-generated QRs
               </ThemedText>
               <ThemedText style={styles.statValue}>{preGeneratedQRs.length}</ThemedText>
+            </View>
+            <View style={styles.statRow}>
+              <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>
+                Photos
+              </ThemedText>
+              <ThemedText style={styles.statValue}>{totalPhotos}</ThemedText>
             </View>
             <View style={styles.statRow}>
               <ThemedText style={[styles.statLabel, { color: colors.textSecondary }]}>
@@ -245,13 +334,19 @@ export default function SettingsScreen() {
             <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>
               App Version
             </ThemedText>
-            <ThemedText>1.0.0</ThemedText>
+            <ThemedText>1.1.0</ThemedText>
           </View>
           <View style={styles.infoRow}>
             <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>
               Backup Format
             </ThemedText>
-            <ThemedText>JSON v1.0</ThemedText>
+            <ThemedText>JSON v2.0</ThemedText>
+          </View>
+          <View style={styles.infoRow}>
+            <ThemedText style={[styles.infoLabel, { color: colors.textSecondary }]}>
+              Features
+            </ThemedText>
+            <ThemedText style={{ textAlign: 'right', flex: 1 }}>Photos, Notes, Custom Fields, PDF Export</ThemedText>
           </View>
         </View>
       </ScrollView>
@@ -307,6 +402,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  buttonRow: {
+    flexDirection: 'row',
+    gap: Spacing.sm,
+  },
   button: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -314,6 +413,14 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: BorderRadius.sm,
     gap: Spacing.sm,
+  },
+  flexButton: {
+    flex: 1,
+  },
+  outlineButton: {
+    width: 48,
+    borderWidth: 2,
+    backgroundColor: 'transparent',
   },
   buttonText: {
     color: '#FFFFFF',

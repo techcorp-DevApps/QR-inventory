@@ -87,7 +87,7 @@ export default function AreaScreen() {
       if (selectedEntityType === 'section') {
         await updateSection(selectedEntity.id, name);
       } else {
-        await updateItem(selectedEntity.id, name);
+        await updateItem(selectedEntity.id, { name });
       }
       setSelectedEntity(null);
     }
