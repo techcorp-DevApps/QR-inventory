@@ -42,3 +42,4 @@
 
 ## Bug Fixes
 - [x] Fix Android build failure - remove deprecated expo-barcode-scanner
+- [ ] Fix Android: locations not saving and QR codes not generating (UUID/AsyncStorage issue)
