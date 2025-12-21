@@ -31,6 +31,18 @@ const config: ExpoConfig = {
   scheme: env.scheme,
   userInterfaceStyle: "automatic",
   newArchEnabled: true,
+  
+  // EAS Update configuration
+  runtimeVersion: {
+    policy: "appVersion"
+  },
+  updates: {
+    url: "https://u.expo.dev/9ec3ebd6-eb6f-4838-9ff5-8d88196d0ac9",
+    enabled: true,
+    fallbackToCacheTimeout: 0,
+    checkAutomatically: "ON_LOAD",
+  },
+  
   ios: {
     supportsTablet: true,
     bundleIdentifier: env.iosBundleId,
