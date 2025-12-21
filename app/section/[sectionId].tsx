@@ -4,10 +4,11 @@ import { useState } from 'react';
 import { FlatList, Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { AddEditModal } from '@/components/add-edit-modal';
+import { BulkItemModal } from '@/components/bulk-item-modal';
 import { EditQRModal } from '@/components/edit-qr-modal';
 import { FAB } from '@/components/fab';
 import { InventoryTile } from '@/components/inventory-tile';
+import { ItemDetailModal } from '@/components/item-detail-modal';
 import { QRModal } from '@/components/qr-modal';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
@@ -39,11 +40,20 @@ export default function SectionScreen() {
   const location = section ? getLocationById(section.locationId) : null;
   const items = getItemsBySection(sectionId);
 
-  const [addModalVisible, setAddModalVisible] = useState(false);
-  const [editModalVisible, setEditModalVisible] = useState(false);
+  // Modal states
   const [qrModalVisible, setQRModalVisible] = useState(false);
   const [editQRModalVisible, setEditQRModalVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
+  
+  // New state for ItemDetailModal (replaces AddEditModal for items)
+  const [addItemModalVisible, setAddItemModalVisible] = useState(false);
+  const [editItemModalVisible, setEditItemModalVisible] = useState(false);
+  
+  // New state for BulkItemModal
+  const [bulkItemModalVisible, setBulkItemModalVisible] = useState(false);
+  
+  // FAB menu state
+  const [showFABMenu, setShowFABMenu] = useState(false);
 
   if (!section || !area || !location) {
     return (
@@ -60,14 +70,37 @@ export default function SectionScreen() {
     setQRModalVisible(true);
   };
 
-  const handleAddItem = async (name: string) => {
-    await addItem(name, section.locationId, section.areaId, section.id);
+  // Handler for opening edit modal from QR modal
+  const handleEditFromQRModal = () => {
+    setQRModalVisible(false);
+    setEditItemModalVisible(true);
   };
 
-  const handleEditItem = async (name: string) => {
+  // Handler for adding new item
+  const handleAddItem = async (itemData: Partial<Item>) => {
+    await addItem(
+      itemData.name || 'New Item',
+      section.locationId,
+      section.areaId,
+      section.id,
+      {
+        quantity: itemData.quantity,
+        condition: itemData.condition,
+        description: itemData.description,
+        notes: itemData.notes,
+        photos: itemData.photos,
+        customFields: itemData.customFields,
+      }
+    );
+    setAddItemModalVisible(false);
+  };
+
+  // Updated handler for saving item changes from ItemDetailModal
+  const handleSaveItemChanges = async (updates: Partial<Item>) => {
     if (selectedItem) {
-      await updateItem(selectedItem.id, { name });
+      await updateItem(selectedItem.id, updates);
       setSelectedItem(null);
+      setEditItemModalVisible(false);
     }
   };
 
@@ -75,10 +108,12 @@ export default function SectionScreen() {
     if (selectedItem) {
       await deleteItem(selectedItem.id);
       setSelectedItem(null);
+      setEditItemModalVisible(false);
     }
   };
 
   const handleEditQR = () => {
+    setQRModalVisible(false);
     setEditQRModalVisible(true);
   };
 
@@ -87,6 +122,17 @@ export default function SectionScreen() {
       await updateItemQR(selectedItem.id, newQRData);
       setSelectedItem({ ...selectedItem, qrData: newQRData });
     }
+  };
+
+  // Handler for bulk item save
+  const handleBulkItemSave = async (bulkItems: Array<{ name: string; quantity: number; condition: Item['condition'] }>) => {
+    for (const item of bulkItems) {
+      await addItem(item.name, section.locationId, section.areaId, section.id, {
+        quantity: item.quantity,
+        condition: item.condition,
+      });
+    }
+    setBulkItemModalVisible(false);
   };
 
   return (
@@ -124,6 +170,10 @@ export default function SectionScreen() {
               name={item.name}
               qrData={item.qrData}
               type="item"
+              description={item.description}
+              quantity={item.quantity}
+              condition={item.condition}
+              photos={item.photos}
               onPress={() => handleItemLongPress(item)}
               onLongPress={() => handleItemLongPress(item)}
             />
@@ -131,26 +181,69 @@ export default function SectionScreen() {
         />
       )}
 
-      <FAB onPress={() => setAddModalVisible(true)} />
+      {/* FAB Menu */}
+      {showFABMenu && (
+        <View style={styles.fabMenu}>
+          <Pressable
+            style={[styles.fabMenuItem, { backgroundColor: colors.item }]}
+            onPress={() => {
+              setAddItemModalVisible(true);
+              setShowFABMenu(false);
+            }}
+          >
+            <MaterialIcons name="inventory-2" size={20} color="#FFFFFF" />
+            <ThemedText style={styles.fabMenuText}>Add Single Item</ThemedText>
+          </Pressable>
+          
+          <Pressable
+            style={[styles.fabMenuItem, { backgroundColor: '#8B5CF6' }]}
+            onPress={() => {
+              setBulkItemModalVisible(true);
+              setShowFABMenu(false);
+            }}
+          >
+            <MaterialIcons name="playlist-add" size={20} color="#FFFFFF" />
+            <ThemedText style={styles.fabMenuText}>Bulk Add Items</ThemedText>
+          </Pressable>
+        </View>
+      )}
 
-      <AddEditModal
-        visible={addModalVisible}
-        onClose={() => setAddModalVisible(false)}
+      <FAB onPress={() => setShowFABMenu(!showFABMenu)} icon={showFABMenu ? 'close' : 'add'} />
+
+      {/* Add Item Modal (using ItemDetailModal) */}
+      <ItemDetailModal
+        visible={addItemModalVisible}
+        onClose={() => setAddItemModalVisible(false)}
         onSave={handleAddItem}
-        type="item"
+        isEditing={false}
       />
 
-      <AddEditModal
-        visible={editModalVisible}
-        onClose={() => {
-          setEditModalVisible(false);
-          setSelectedItem(null);
-        }}
-        onSave={handleEditItem}
-        onDelete={handleDeleteItem}
-        type="item"
-        initialName={selectedItem?.name}
-        isEditing
+      {/* Edit Item Modal (using ItemDetailModal) */}
+      {selectedItem && (
+        <ItemDetailModal
+          visible={editItemModalVisible}
+          onClose={() => {
+            setEditItemModalVisible(false);
+            setSelectedItem(null);
+          }}
+          onSave={handleSaveItemChanges}
+          onDelete={handleDeleteItem}
+          initialData={selectedItem}
+          isEditing
+        />
+      )}
+
+      {/* Bulk Item Modal */}
+      <BulkItemModal
+        visible={bulkItemModalVisible}
+        onClose={() => setBulkItemModalVisible(false)}
+        onSave={handleBulkItemSave}
+        locationId={section.locationId}
+        areaId={section.areaId}
+        sectionId={section.id}
+        locationName={location.name}
+        areaName={area.name}
+        sectionName={section.name}
       />
 
       {selectedItem && (
@@ -166,6 +259,7 @@ export default function SectionScreen() {
             type="item"
             breadcrumb={breadcrumb}
             onEditQR={handleEditQR}
+            onEdit={handleEditFromQRModal}
           />
 
           <EditQRModal
@@ -211,7 +305,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: Spacing.lg,
-    paddingBottom: 100,
+    paddingBottom: 120,
   },
   emptyContainer: {
     flex: 1,
@@ -227,5 +321,29 @@ const styles = StyleSheet.create({
   emptyHint: {
     fontSize: 14,
     textAlign: 'center',
+  },
+  fabMenu: {
+    position: 'absolute',
+    bottom: 96,
+    right: 24,
+    gap: 10,
+  },
+  fabMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 24,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  fabMenuText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
