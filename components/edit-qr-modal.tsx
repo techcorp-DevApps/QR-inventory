@@ -11,11 +11,12 @@ import {
 } from 'react-native';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { QRScanner } from '@/components/qr-scanner';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Colors, BorderRadius, Spacing } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { hexToQRData, isValidQRData, formatHexForDisplay } from '@/lib/qr-utils';
+import { hexToQRData, isValidQRData, formatHexForDisplay, qrDataToHex } from '@/lib/qr-utils';
 import type { EntityType } from '@/types/inventory';
 
 type EditMode = 'select' | 'scan' | 'hex';
@@ -143,22 +144,15 @@ export function EditQRModal({
     </View>
   );
 
-  const renderScanMode = () => (
-    <View style={styles.scanContainer}>
-      <View style={styles.scanHeader}>
-        <Pressable onPress={() => setMode('select')} style={styles.backButton}>
-          <MaterialIcons name="arrow-back" size={24} color={colors.tint} />
-        </Pressable>
-        <ThemedText type="subtitle">Scan QR Code</ThemedText>
-        <View style={{ width: 40 }} />
-      </View>
-
-      {scannedData ? (
+  const renderScanMode = () => {
+    // If already scanned, show confirmation
+    if (scannedData) {
+      return (
         <View style={styles.scannedResult}>
           <MaterialIcons name="check-circle" size={64} color="#10B981" />
           <ThemedText style={styles.scannedTitle}>QR Code Scanned!</ThemedText>
           <ThemedText style={[styles.scannedHex, { color: colors.textSecondary }]}>
-            {formatHexForDisplay(scannedData.substring(0, 32))}...
+            {formatHexForDisplay(qrDataToHex(scannedData).substring(0, 32))}...
           </ThemedText>
           <View style={styles.scannedButtons}>
             <Pressable
@@ -175,34 +169,21 @@ export function EditQRModal({
             </Pressable>
           </View>
         </View>
-      ) : (
-        <View style={styles.scanPlaceholder}>
-          <View style={[styles.scanFrame, { borderColor: accentColor }]}>
-            <MaterialIcons name="qr-code-scanner" size={80} color={colors.textDisabled} />
-          </View>
-          <ThemedText style={[styles.scanHint, { color: colors.textSecondary }]}>
-            Camera scanning is available on mobile devices.
-          </ThemedText>
-          <ThemedText style={[styles.scanHint, { color: colors.textSecondary }]}>
-            For web preview, use "Enter QR Hex" option instead.
-          </ThemedText>
-          
-          {/* Simulated scan for testing */}
-          <Pressable
-            style={[styles.simulateScanButton, { backgroundColor: colors.elevated }]}
-            onPress={() => {
-              // For demo/testing purposes
-              Alert.alert('Scan Simulation', 'Use hex entry on web platform to enter QR data manually.');
-            }}
-          >
-            <ThemedText style={{ color: colors.textSecondary }}>
-              Simulate Scan (for testing)
-            </ThemedText>
-          </Pressable>
-        </View>
-      )}
-    </View>
-  );
+      );
+    }
+
+    // Show actual camera scanner (Task 1.2 - Integrate QRScanner)
+    return (
+      <View style={styles.scannerContainer}>
+        <QRScanner
+          onScan={handleScanResult}
+          onClose={() => setMode('select')}
+          title="Scan QR Code"
+          subtitle={`Scan a pre-generated QR code to assign to ${entityName}`}
+        />
+      </View>
+    );
+  };
 
   const renderHexMode = () => (
     <View style={styles.hexContainer}>
@@ -256,6 +237,20 @@ export function EditQRModal({
     </View>
   );
 
+  // For scan mode, we need a full-screen modal
+  if (visible && mode === 'scan' && !scannedData) {
+    return (
+      <Modal
+        visible={visible}
+        animationType="slide"
+        presentationStyle="fullScreen"
+        onRequestClose={handleClose}
+      >
+        {renderScanMode()}
+      </Modal>
+    );
+  }
+
   return (
     <Modal
       visible={visible}
@@ -276,7 +271,7 @@ export function EditQRModal({
         >
           <View style={styles.handle} />
           {mode === 'select' && renderSelectMode()}
-          {mode === 'scan' && renderScanMode()}
+          {mode === 'scan' && scannedData && renderScanMode()}
           {mode === 'hex' && renderHexMode()}
         </ThemedView>
       </KeyboardAvoidingView>
@@ -354,8 +349,9 @@ const styles = StyleSheet.create({
   cancelText: {
     fontSize: 16,
   },
-  scanContainer: {
+  scannerContainer: {
     flex: 1,
+    minHeight: 400,
   },
   scanHeader: {
     flexDirection: 'row',
@@ -368,37 +364,12 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
   },
-  scanPlaceholder: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: Spacing.md,
-  },
-  scanFrame: {
-    width: 200,
-    height: 200,
-    borderWidth: 3,
-    borderRadius: BorderRadius.md,
-    borderStyle: 'dashed',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: Spacing.lg,
-  },
-  scanHint: {
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  simulateScanButton: {
-    marginTop: Spacing.lg,
-    paddingVertical: Spacing.sm,
-    paddingHorizontal: Spacing.lg,
-    borderRadius: BorderRadius.sm,
-  },
   scannedResult: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
     gap: Spacing.md,
+    paddingVertical: Spacing.xl,
   },
   scannedTitle: {
     fontSize: 20,
@@ -407,7 +378,7 @@ const styles = StyleSheet.create({
   },
   scannedHex: {
     fontSize: 12,
-    fontFamily: 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   scannedButtons: {
     flexDirection: 'row',
@@ -437,7 +408,7 @@ const styles = StyleSheet.create({
     borderRadius: BorderRadius.sm,
     padding: Spacing.md,
     fontSize: 16,
-    fontFamily: 'monospace',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
     minHeight: 100,
     textAlignVertical: 'top',
   },
